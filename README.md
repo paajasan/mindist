@@ -6,6 +6,8 @@ Method for calculating minimum distances between two sets of atoms in MD simulat
 
 1. Python 3 with NumPy
 1. [Numba](https://numba.pydata.org/) with cuda acceleration (only for `mindist_cuda`)
+1. gfortran (might work, but has not been tested with other fortran compilers)
+
 
 ## Licensing
 
@@ -27,7 +29,7 @@ pip install .
 
 in the project root. This will take care of the dependencies and compile the `_f2py` library.
 
-This will not install numba or the cudatoolkit, so if you want to use the GPU, you will have ot install them manually. This can also be done after installation.
+This will not install numba or the cudatoolkit, so if you want to use the GPU, you will have ot install them manually. This can also be done after installation. Do remember to check that your cudatoolit version matches your cuda version.
 
 If you want to uninstall the project, run
 
@@ -53,6 +55,22 @@ prot   = u.select_atoms("protein")
 mind = mindist.mindist(prot, lipids)
 ```
 
+or to take the pbc into account
+
+
+```python
+import mindist
+import MDAnalysis as mda
+
+u = mda.Universe("struct.gro")
+
+lipids = u.select_atoms("resname POPC")
+prot   = u.select_atoms("protein")
+box = u.trajectory[0].triclinic_dimensions
+# Calculate minimum distances from atoms in prot to any atom in lipids
+mind = mindist.mindist_pbc(prot, lipids, box)
+```
+
 ### mindist()
 
 Calculate the minimum distance for each of the *N* atom in **a** to any of the *M* atom in **center**
@@ -71,12 +89,14 @@ A brute force approach, accelerated only with OpenMP. Scales as $\mathcal O(NM)$
 
 Same as `mindist_omp()`, but using `numba` to accelerate with cuda. Best when $N$ is very large.
 
+If `numba` or `numba.cuda` can not be imported, this function is unreachable. A boolean flag `mindist.can_use_cuda` will be set to False, with the `ImportError` reachable as `mindist.no_cuda_reason`. If the libraries were imported without problem, `mindist.can_use_cuda=True` and `mindist.no_cuda_reason=None`
+
 
 ### mindist_pbc()
 
 Like `mindist()`, but takes the periodic boundary conditions into account. Assumes they are applied in all three directions. Works by doing the calculations in reciprocal space (relative to the box vectors). Should work for any box defined by a 3 by 3 matrix of box vectors (e.g. for cubic box a diagonal matrix with box lengths on the diagonal).
 
-#### mindist_grid_pbc()
+#### mindist_pbc_grid()
 
 Like `mindist_grid()`, but takes the periodic boundary conditions into account.
 
