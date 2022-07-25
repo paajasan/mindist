@@ -168,7 +168,7 @@ subroutine grid_dists(pos, mind)
   mind2 = huge(1._dp)
   ! iterate over bins
   do i=1,numbins_c
-    ! if net bin is too far, we can stop iterating
+    ! if next bin is too far, we can stop iterating
     if(mind<bindists(i,bi)-bin_diff) then
       exit
     endif
@@ -177,12 +177,7 @@ subroutine grid_dists(pos, mind)
 
     call int_to_bin_c(j, bin_ind)
     ! get atom list of the bin
-    curlist = atoms_in_bins(bin_ind(1),bin_ind(2),bin_ind(3)) 
-    ! Technically this should not happen
-    ! TODO: remove below
-    if(curlist%num==0) then
-      cycle
-    endif
+    curlist = atoms_in_bins(bin_ind(1),bin_ind(2),bin_ind(3))
 
     ! Go through the atoms in the bin
     do k=1,curlist%num
