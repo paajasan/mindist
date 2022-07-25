@@ -57,7 +57,7 @@ subroutine invert(a, center, n, m, box, s_a, s_c)
   implicit none
   integer, parameter:: dp=kind(0.d0)
 
-!     Calculate the minimum distance for each element in a to groups in center, taking PBC into account
+!     invert the coordinates in a and center into reciprocal space (relative to box vectors)
   
   integer, intent(in)   :: n,m
   real(dp), intent(in)  :: a(n,3), center(m,3), box(3,3)
@@ -81,20 +81,29 @@ end subroutine invert
 
 subroutine distance_PBC(s_1, s_2, box, dist)
   integer, parameter:: dp=kind(0.d0)
+
+!   Calculate the real distance from the scaled positions, taking PBC into account.
   real(dp), intent(in) :: s_1(3),s_2(3),box(3,3)
   real(dp)              :: diff(3)
   real(dp), intent(out) :: dist
   integer               :: i
 
+  ! Distance in reciprocal space
   diff = s_1-s_2 
   do i=1,3
-    if(abs(diff(i))>0.5) then
-      diff(i) = diff(i)-sign(1.0_dp,diff(i))
+    ! check if needs to be moved in any direction (PBC check)
+    ! The coordinates were put into box, so the difference vec is limited to [-1,1]
+    ! We simply shift the distance by one, so that it ends up in [-0.5,0.5]
+    if(diff(i)>0.5) then
+      diff(i) = diff(i)-1
+    else if (diff(i)<-0.5) then
+      diff(i) = diff(i)+1
     endif
   enddo
 
+  ! calculate real difference vector
   diff = matmul(diff, box)
-
+  ! Calculate squared distance
   dist = sum(diff**2)
 end
 
