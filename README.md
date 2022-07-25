@@ -52,7 +52,7 @@ u = mda.Universe("struct.gro")
 lipids = u.select_atoms("resname POPC")
 prot   = u.select_atoms("protein")
 # Calculate minimum distances from atoms in prot to any atom in lipids
-mind = mindist.mindist(prot, lipids)
+mind = mindist.mindist(prot.positions, lipids.positions)
 ```
 
 or to take the pbc into account
@@ -68,7 +68,7 @@ lipids = u.select_atoms("resname POPC")
 prot   = u.select_atoms("protein")
 box = u.trajectory[0].triclinic_dimensions
 # Calculate minimum distances from atoms in prot to any atom in lipids
-mind = mindist.mindist_pbc(prot, lipids, box)
+mind = mindist.mindist_pbc(prot.positions, lipids.positions, box)
 ```
 
 ### mindist()
