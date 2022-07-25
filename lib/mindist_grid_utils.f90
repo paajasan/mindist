@@ -29,17 +29,20 @@ module mindist_grid_utils
   real(dp), allocatable :: bindists(:,:)
   integer(int_size), allocatable :: sorted_index(:,:)
 
+  ! atomlist saves the num for numatoms, as well as next, to keep
+  ! track how many have been added. pos is the array of positions
   type :: atomlist
     integer :: num,next
     real(dp), dimension(:,:), allocatable :: pos
   end type atomlist
 
 
-
+  ! Grid of atomlists
   type(atomlist),allocatable   :: atoms_in_bins(:,:,:)  
   
 contains
 
+! Helper subroutine to get the i'th bin indices
 subroutine int_to_bin(i,bin_ind)
   integer, intent(in)  :: i
   integer, intent(out) :: bin_ind(3)
@@ -49,6 +52,7 @@ subroutine int_to_bin(i,bin_ind)
   bin_ind(3)=modulo((i-1)/(nbins(1)*nbins(2)),nbins(3))+1
 end
 
+! Helper subroutine to get the number of a bin
 subroutine bin_to_int(bin_ind,i)
   integer, intent(in)  :: bin_ind(3)
   integer, intent(out) :: i
@@ -56,6 +60,7 @@ subroutine bin_to_int(bin_ind,i)
   i=bin_ind(1)+(bin_ind(2)-1)*nbins(1)+(bin_ind(3)-1)*nbins(1)*nbins(2)
 end
 
+! Helper subroutine to calculate squared distance of two points
 subroutine distance(pos1, pos2, dist)
   integer, parameter:: dp=kind(0.d0)
   real(dp), intent(in) :: pos1(3),pos2(3)
@@ -66,6 +71,7 @@ subroutine distance(pos1, pos2, dist)
   dist = sum(diff**2)
 end
 
+! Like int_to_bin, but in the center grid
 subroutine int_to_bin_c(i,bin_ind)
   integer, intent(in)  :: i
   integer, intent(out) :: bin_ind(3)
@@ -75,6 +81,7 @@ subroutine int_to_bin_c(i,bin_ind)
   bin_ind(3)=modulo((i-1)/(nbins_c(1)*nbins_c(2)),nbins_c(3))+1
 end
 
+! Like bin_to_int, but in the center grid
 subroutine bin_to_int_c(bin_ind,i)
   integer, intent(in)  :: bin_ind(3)
   integer, intent(out) :: i
@@ -110,9 +117,11 @@ subroutine setup_utils(nubins, minims, nubins_c, minims_c, bin_size, atomlists_b
     nb = atoms_in_bins(bin1(1),bin1(2),bin1(3))%num
     do j=1,numbins
       if(nb>0) then
+        ! Get indices of bin2 and calculate distance of bin centers
         call int_to_bin(j,bin2)
         call distance(mins_c+bin1*binsize,mins+bin2*binsize, dist)
       else
+        ! If there are no atoms in the grdpoint, teh distance is set to a lage value
         dist = 10*sum(nbins**2)*binsize**2
       endif
       bindists(i,j) = dist
@@ -122,6 +131,7 @@ subroutine setup_utils(nubins, minims, nubins_c, minims_c, bin_size, atomlists_b
 
   !$OMP PARALLEL DO
   do i=1,numbins
+    ! sort bindists in ascending order
     call sort_index(bindists(:,i),sorted_index(:,i))
     bindists(:,i) = sqrt(bindists(:,i))
   enddo
@@ -151,25 +161,32 @@ subroutine grid_dists(pos, mind)
   enddo
 
   call bin_to_int(curbin,bi)
-
+  ! maximum amount the atom-to-atom distance can vary from bin-to-bin distance
   bin_diff = 1.7321*binsize
 
   mind  = huge(1._dp)
   mind2 = huge(1._dp)
+  ! iterate over bins
   do i=1,numbins_c
+    ! if net bin is too far, we can stop iterating
     if(mind<bindists(i,bi)-bin_diff) then
       exit
     endif
+    ! get next closest bin
     j = int(sorted_index(i, bi))
 
     call int_to_bin_c(j, bin_ind)
-    
+    ! get atom list of the bin
     curlist = atoms_in_bins(bin_ind(1),bin_ind(2),bin_ind(3)) 
+    ! Technically this should not happen
+    ! TODO: remove below
     if(curlist%num==0) then
       cycle
     endif
 
+    ! Go through the atoms in the bin
     do k=1,curlist%num
+      ! Calulate squared distance and if smaller than pevious smallest, save
       call distance(curlist%pos(k,:), pos,dist)
       if(dist<mind2) then
         mind2 = dist

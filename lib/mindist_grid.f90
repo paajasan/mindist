@@ -49,6 +49,7 @@ subroutine mindist(a, center, n, m, binsize, out)
 !f2py intent(out), depend(n) out
 
 
+  ! Start by finding the extrema
   mins(:)=center(1,:)
   maxs(:)=center(1,:)
   
@@ -64,10 +65,11 @@ subroutine mindist(a, center, n, m, binsize, out)
   enddo
   !$OMP END PARALLEL DO
 
+  ! Save centre extrema
   mins_c = mins
   maxs_c = maxs
 
-
+  ! Also search the other group
   !$OMP PARALLEL DO PRIVATE(i,j) reduction(min:mins)  reduction(max:maxs)
   do i=1,n
     do j=1,3
@@ -80,6 +82,7 @@ subroutine mindist(a, center, n, m, binsize, out)
   enddo
   !$OMP END PARALLEL DO
 
+  ! change min values by half bin and calculate nbins
   do i=1,3
     mins(i) = mins(i)-binsize/2
     nbins(i) = floor((binsize/2+maxs(i)-mins(i))/binsize)+1
@@ -87,9 +90,10 @@ subroutine mindist(a, center, n, m, binsize, out)
     nbins_c(i) = floor((binsize/2+maxs_c(i)-mins_c(i))/binsize)+1
   enddo
 
-  
+  ! Allocate atom grid
   allocate(atoms_in_bins(nbins_c(1),nbins_c(2),nbins_c(3)))
 
+  ! Calculate number of atoms in each bin
   do i=1,nbins_c(1)
     do j=1,nbins_c(2)
       do k=1,nbins_c(3)
@@ -99,7 +103,6 @@ subroutine mindist(a, center, n, m, binsize, out)
     enddo
   enddo
 
-
   do i=1,m
     do j=1,3
       curbin(j)=floor((center(i,j)-mins_c(j))/binsize)+1
@@ -108,7 +111,7 @@ subroutine mindist(a, center, n, m, binsize, out)
     atoms_in_bins(curbin(1),curbin(2),curbin(3))%num = k+1
   enddo
 
-
+  ! Allocate the atom list in each bin
   do i=1,nbins_c(1)
     do j=1,nbins_c(2)
       do k=1,nbins_c(3)
@@ -119,8 +122,7 @@ subroutine mindist(a, center, n, m, binsize, out)
     enddo
   enddo
 
-
-
+  ! Put atoms in bins
   do i=1,m
     do j=1,3
       curbin(j)=floor((center(i,j)-mins_c(j))/binsize)+1
@@ -131,17 +133,17 @@ subroutine mindist(a, center, n, m, binsize, out)
   enddo
 
 
-
+  ! Setup the calculations
   call setup_utils(nbins, mins, nbins_c, mins_c, binsize, atoms_in_bins)
 
-  
+  ! Calculate distance for each atom
 !$OMP PARALLEL DO PRIVATE(curbin, i,j)
   do i=1,n
     call grid_dists(a(i,:), out(i))
   enddo
 !$OMP END PARALLEL DO
 
-
+  ! deallocate atom list
   do i=1,nbins_c(1)
     do j=1,nbins_c(2)
       do k=1,nbins_c(3)
@@ -154,6 +156,7 @@ subroutine mindist(a, center, n, m, binsize, out)
 
   deallocate(atoms_in_bins)
 
+  ! clean up the utilities
   call cleanup_utils()
 
 end
