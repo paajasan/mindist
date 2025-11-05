@@ -1,17 +1,17 @@
 # MIT License
-# 
+#
 # Copyright (c) 2022 Santeri Paajanen
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -23,9 +23,9 @@
 from . import _f2py
 import sys
 
-mindist_omp        = _f2py.mindist
-__mindist_grid     = _f2py.mindist_grid
-mindist_pbc_omp    = _f2py.mindist_PBC
+mindist_omp = _f2py.mindist
+__mindist_grid = _f2py.mindist_grid
+mindist_pbc_omp = _f2py.mindist_PBC
 __mindist_pbc_grid = _f2py.mindist_PBC_grid
 
 _can_use_cuda = False
@@ -37,14 +37,17 @@ try:
     import numpy as np
     import math
 
+    _cuda_device = cuda.select_device(0)
     # Code for "clever" choosing of nthreads
-    MAX_THREADS_PER_BLOCK = cuda.get_current_device().MAX_THREADS_PER_BLOCK
+    MAX_THREADS_PER_BLOCK = _cuda_device.MAX_THREADS_PER_BLOCK
     # 4 times SM count should give good occupancy... I think
-    MIN_BLOCKS = cuda.get_current_device().MULTIPROCESSOR_COUNT*4
-    WARP_SIZE = cuda.get_current_device().WARP_SIZE
+    MIN_BLOCKS = _cuda_device.MULTIPROCESSOR_COUNT*4
+    WARP_SIZE = _cuda_device.WARP_SIZE
     # Possible nthreads are multiples of WARP_SIZE up to MAX_THREADS_PER_BLOCK.
     # Should be ordered in descending order
-    nthread_pos = np.arange(WARP_SIZE, MAX_THREADS_PER_BLOCK+1, WARP_SIZE)[::-1]
+    nthread_pos = np.arange(WARP_SIZE,
+                            MAX_THREADS_PER_BLOCK+1,
+                            WARP_SIZE)[::-1]
 
     def get_nthreads(n):
         """
@@ -53,25 +56,25 @@ try:
         Returns:
             nthreads: The smallest number of threads from nthread_pos, that gices at least MIN_BLOCKS blocks
         """
-        global nthread_pos,MIN_BLOCKS
-        bigenough = (n-1)//nthread_pos+1>=MIN_BLOCKS
+        global nthread_pos, MIN_BLOCKS
+        bigenough = (n-1)//nthread_pos+1 >= MIN_BLOCKS
         i = np.argmax(bigenough)
         return nthread_pos[i] if bigenough[i] else nthread_pos[-1]
 
     @cuda.jit("void(f8[:,:], f8[:,:], f8[:])")
     def __mindist_cuda(a, center, out):
         i = cuda.grid(1)
-        if(i>=out.shape[0]): return
-        mind=1000000.0
+        if (i >= out.shape[0]):
+            return
+        mind = 1000000.0
         for j in range(center.shape[0]):
-            dist=0.0
+            dist = 0.0
             for k in range(a.shape[-1]):
-                dist += (a[i, k]-center[j,k])**2
-                
-            if(dist<mind):
-                mind=dist
-        out[i]=math.sqrt(mind)
+                dist += (a[i, k]-center[j, k])**2
 
+            if (dist < mind):
+                mind = dist
+        out[i] = math.sqrt(mind)
 
     def mindist_cuda(a, center, nthreads=None):
         """
@@ -87,15 +90,15 @@ try:
         out: array of (n,) minimum distances
         """
 
-        if(a.dtype!=np.dtype('float64')):
+        if (a.dtype != np.dtype('float64')):
             a = a.astype(np.float64)
-        if(center.dtype!=np.dtype('float64')):
+        if (center.dtype != np.dtype('float64')):
             center = center.astype(np.float64)
 
         d_a = cuda.to_device(a)
         d_c = cuda.to_device(center)
         d_o = cuda.device_array(d_a.shape[0])
-        if(nthreads is None):
+        if (nthreads is None):
             nthreads = get_nthreads(a.shape[0])
 
         __mindist_cuda[(a.shape[0]-1)//nthreads+1, nthreads](d_a, d_c, d_o)
@@ -105,30 +108,31 @@ try:
     @cuda.jit("void(f8[:,:], f8[:,:], f8[:,:], f8[:])")
     def __mindist_cuda_pbc(s_a, s_c, box, out):
         i = cuda.grid(1)
-        if(i>=out.shape[0]): return
-        mind=1000000.0
-        diff  = cuda.local.array(3,numba_float64)
-        diff2 = cuda.local.array(3,numba_float64)
+        if (i >= out.shape[0]):
+            return
+        mind = 1000000.0
+        diff = cuda.local.array(3, numba_float64)
+        diff2 = cuda.local.array(3, numba_float64)
         for j in range(s_c.shape[0]):
-            dist=0.0
+            dist = 0.0
             for k in range(3):
-                diff[k] = s_a[i,k]-s_c[j,k]
-                if(diff[k]>0.5):
+                diff[k] = s_a[i, k]-s_c[j, k]
+                if (diff[k] > 0.5):
                     diff[k] -= 1.0
-                elif(diff[k]<-0.5):
+                elif (diff[k] < -0.5):
                     diff[k] += 1.0
 
             for l in range(3):
-                diff2[l]=0.0
+                diff2[l] = 0.0
                 for m in range(3):
-                    diff2[l] +=  box[m,l]*diff[m]
-                
+                    diff2[l] += box[m, l]*diff[m]
+
             for k in range(3):
                 dist += diff2[k]**2
 
-            if(dist<mind):
-                mind=dist
-        out[i]=math.sqrt(mind)
+            if (dist < mind):
+                mind = dist
+        out[i] = math.sqrt(mind)
 
     def mindist_cuda_pbc(a, center, box, nthreads=None):
         """
@@ -143,22 +147,23 @@ try:
         out: array of (n,) minimum distances
         """
 
-        if(a.dtype!=np.dtype('float64')):
+        if (a.dtype != np.dtype('float64')):
             a = a.astype(np.float64)
-        if(center.dtype!=np.dtype('float64')):
+        if (center.dtype != np.dtype('float64')):
             center = center.astype(np.float64)
-        if(box.dtype!=np.dtype('float64')):
+        if (box.dtype != np.dtype('float64')):
             box = box.astype(np.float64)
-        
+
         invbox = np.linalg.inv(box)
 
         d_a = cuda.to_device((a @ invbox) % 1)
         d_c = cuda.to_device((center @ invbox) % 1)
         d_b = cuda.to_device(box)
         d_o = cuda.device_array(d_a.shape[0])
-        if(nthreads is None):
+        if (nthreads is None):
             nthreads = get_nthreads(a.shape[0])
-        __mindist_cuda_pbc[(a.shape[0]-1)//nthreads+1, nthreads](d_a, d_c, d_b, d_o)
+        __mindist_cuda_pbc[(a.shape[0]-1)//nthreads+1,
+                           nthreads](d_a, d_c, d_b, d_o)
         out = d_o.copy_to_host()
         return out
 
@@ -167,20 +172,20 @@ try:
 except ImportError as e:
     reason = e
 
-except Exception  as e:
-    print("IMporting numba and numba.cuda successfully, but another exception caught:")
-    print("%s: %s"%(e.__class__.__name__,str(e)), file=sys.stderr)
+except Exception as e:
+    print("Imported numba and numba.cuda successfully, but another exception caught:")
+    print("%s: %s" % (e.__class__.__name__, str(e)), file=sys.stderr)
 
-    if(e.__class__ is cuda.cudadrv.driver.LinkerError and "Unsupported .version" in str(e)):
+    if (e.__class__ is cuda.cudadrv.driver.LinkerError and "Unsupported .version" in str(e)):
         print("Check that your cuda version is same or newer than cudatoolkit", file=sys.stderr)
         v = cuda.cudadrv.runtime.Runtime().get_version()
-        print("cudatoolkit version %s"%(".".join([str(i) for i in v])), file=sys.stderr)
-
+        print("cudatoolkit version %s" %
+              (".".join([str(i) for i in v])), file=sys.stderr)
 
     print("Continuing without cuda", file=sys.stderr)
-    
+
     reason = e
-    
+
 
 def mindist_grid(a, center, gridsize=15.0):
     """
@@ -202,7 +207,7 @@ def mindist_grid(a, center, gridsize=15.0):
     returns:
         out: array of (n,) minimum distances
     """
-    return __mindist_grid(a,center, gridsize)
+    return __mindist_grid(a, center, gridsize)
 
 
 def mindist_pbc_grid(a, center, box, gridsize=12.5):
@@ -229,9 +234,7 @@ def mindist_pbc_grid(a, center, box, gridsize=12.5):
     returns:
         out: array of (n,) minimum distances
     """
-    return __mindist_pbc_grid(a,center, box, gridsize)
-
-
+    return __mindist_pbc_grid(a, center, box, gridsize)
 
 
 def mindist_pbc(a, center, box, bruteforce=True, gridsize=12.5, use_cuda=_can_use_cuda, nthreads=None):
@@ -255,15 +258,16 @@ def mindist_pbc(a, center, box, bruteforce=True, gridsize=12.5, use_cuda=_can_us
     returns:
         out: array of (n,) minimum distances
     """
-    if(bruteforce and use_cuda):
-        if(_can_use_cuda):
-            return mindist_cuda_pbc(a,center, box,nthreads)
+    if (bruteforce and use_cuda):
+        if (_can_use_cuda):
+            return mindist_cuda_pbc(a, center, box, nthreads)
         print("Failed to use cuda JIT with numba", file=sys.stderr)
-        print("Reason: %s: %s"%(reason.__class__.__name__,str(reason)), file=sys.stderr)
+        print("Reason: %s: %s" %
+              (reason.__class__.__name__, str(reason)), file=sys.stderr)
         print("Using copmiled fortran version", file=sys.stderr)
-    if(bruteforce):
-        return mindist_pbc_omp(a,center, box)
-    return mindist_pbc_grid(a,center, box, gridsize)
+    if (bruteforce):
+        return mindist_pbc_omp(a, center, box)
+    return mindist_pbc_grid(a, center, box, gridsize)
 
 
 def mindist(a, center, bruteforce=True, gridsize=15.0, use_cuda=_can_use_cuda, nthreads=None):
@@ -286,12 +290,13 @@ def mindist(a, center, bruteforce=True, gridsize=15.0, use_cuda=_can_use_cuda, n
 
     NOTE! if bruteforce=False, then k must 3
     """
-    if(bruteforce and use_cuda):
-        if(_can_use_cuda):
-            return mindist_cuda(a,center,nthreads)
+    if (bruteforce and use_cuda):
+        if (_can_use_cuda):
+            return mindist_cuda(a, center, nthreads)
         print("Failed to use cuda JIT with numba", file=sys.stderr)
-        print("Reason: %s: %s"%(reason.__class__.__name__,str(reason)), file=sys.stderr)
+        print("Reason: %s: %s" %
+              (reason.__class__.__name__, str(reason)), file=sys.stderr)
         print("Using copmiled fortran version", file=sys.stderr)
-    if(bruteforce):
-        return mindist_omp(a,center)
-    return mindist_grid(a,center, gridsize)
+    if (bruteforce):
+        return mindist_omp(a, center)
+    return mindist_grid(a, center, gridsize)
