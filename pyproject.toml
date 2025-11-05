@@ -23,4 +23,9 @@ classifiers     = [
 dependencies    = ["numpy>=2"]
 
 [project.optional-dependencies]
-cuda = ["numba-cuda"]
+cu12 = [
+    "numba-cuda[cu12]"
+]
+cu13 = [
+    "numba-cuda[cu13]"
+]
