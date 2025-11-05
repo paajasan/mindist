@@ -1,5 +1,27 @@
 
 
 [build-system]
-requires      = ["setuptools<60", "numpy==1.21"]
-build-backend = "setuptools.build_meta"
+requires      = ["meson-python", "numpy>=2"]
+build-backend = "mesonpy"
+
+[project]
+name            = "mindist"
+authors         = [
+    {name = "Santeri Paajanen", email = "santeri.e.paajanen@helsinki.fi"}
+]
+requires-python = ">=3.8"
+version         = "0.0.1"
+description     = "Minimum distance calculations for MD data"
+readme          = "README.md"
+license         = "MIT"
+license-files   = ["LICENSE"]
+classifiers     = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Fortran",
+    "Operating System :: OS Independent",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies    = ["numpy>=2"]
+
+[project.optional-dependencies]
+cuda = ["numba-cuda"]

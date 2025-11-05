@@ -5,7 +5,7 @@ Method for calculating minimum distances between two sets of atoms in MD simulat
 ## Requirements
 
 1. Python 3 with NumPy
-1. [Numba](https://numba.pydata.org/) with cuda acceleration (only for `mindist_cuda`)
+1. [Numba](https://nvidia.github.io/numba-cuda/user/installation.html) with cuda acceleration (only for `mindist_cuda`)
 1. gfortran (might work, but has not been tested with other fortran compilers)
 
 
