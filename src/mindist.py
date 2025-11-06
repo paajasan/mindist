@@ -25,7 +25,9 @@ import sys
 
 mindist_omp = _f2py.mindist
 __mindist_grid = _f2py.mindist_grid
-mindist_pbc_omp = _f2py.mindist_PBC
+mindist_omp_traj = _f2py.mindist_trajectory
+mindist_omp_pbc = _f2py.mindist_PBC
+mindist_omp_pbc_traj = _f2py.mindist_PBC_trajectory
 __mindist_pbc_grid = _f2py.mindist_PBC_grid
 
 _can_use_cuda = False
@@ -54,12 +56,17 @@ try:
         Parameters:
             n: the total number of threads
         Returns:
-            nthreads: The smallest number of threads from nthread_pos, that gices at least MIN_BLOCKS blocks
+            nthreads: The smallest number of threads from nthread_pos, that gives at least MIN_BLOCKS blocks
         """
         global nthread_pos, MIN_BLOCKS
         bigenough = (n-1)//nthread_pos+1 >= MIN_BLOCKS
         i = np.argmax(bigenough)
-        return nthread_pos[i] if bigenough[i] else nthread_pos[-1]
+        return int(nthread_pos[i]) if bigenough[i] else int(nthread_pos[-1])
+
+    def get_2nthreads(n0, n1):
+        nt1 = get_nthreads(n1)
+        nt0 = 2**((get_nthreads(n0*n1)//nt1).bit_length()-1)
+        return nt0, nt1
 
     @cuda.jit("void(f8[:,:], f8[:,:], f8[:])")
     def __mindist_cuda(a, center, out):
@@ -95,13 +102,64 @@ try:
         if (center.dtype != np.dtype('float64')):
             center = center.astype(np.float64)
 
-        d_a = cuda.to_device(a)
-        d_c = cuda.to_device(center)
+        d_a = cuda.to_device(np.ascontiguousarray(a))
+        d_c = cuda.to_device(np.ascontiguousarray(center))
         d_o = cuda.device_array(d_a.shape[0])
         if (nthreads is None):
             nthreads = get_nthreads(a.shape[0])
 
         __mindist_cuda[(a.shape[0]-1)//nthreads+1, nthreads](d_a, d_c, d_o)
+        out = d_o.copy_to_host()
+        return out
+
+    @cuda.jit("void(f8[:,:,:], f8[:,:,:], f8[:,:])")
+    def __mindist_cuda_traj(a, center, out):
+        i, j = cuda.grid(2)
+        if (i >= out.shape[0] or j >= out.shape[1]):
+            return
+        mind = 1000000.0
+        for k in range(center.shape[1]):
+            dist = 0.0
+            for l in range(a.shape[-1]):
+                dist += (a[i, j, l]-center[i, k, l])**2
+
+            if (dist < mind):
+                mind = dist
+        out[i, j] = math.sqrt(mind)
+
+    def mindist_cuda_traj(a, center, nthreads=None):
+        """
+        The numba cuda function used by mindist
+
+        parameters:
+        a: (n,k) array of n k-dimensional coordinates
+        center: (m,k) array of m  k-dimensional coordinates
+        nthreads: Changes the amount of threads in the cuda kernel.
+                  If None, tries to be smart. [default: None].
+
+        returns:
+        out: array of (n,) minimum distances
+        """
+
+        if (a.dtype != np.dtype('float64')):
+            a = a.astype(np.float64)
+        if (center.dtype != np.dtype('float64')):
+            center = center.astype(np.float64)
+
+        d_a = cuda.to_device(np.ascontiguousarray(a))
+        d_c = cuda.to_device(np.ascontiguousarray(center))
+        # d_o = cuda.device_array(d_a.shape[:2])
+        d_o = cuda.to_device(np.full(d_a.shape[:2], np.nan))
+        if (nthreads is None):
+            nt0, nt1 = get_2nthreads(*a.shape[:2])
+        else:
+            if type(nthreads) == tuple:
+                nt0, nt1 = nthreads
+            else:
+                nt0 = nt1 = nthreads
+
+        __mindist_cuda_traj[((a.shape[0]-1)//nt0+1, (a.shape[1]-1)//nt1+1),
+                            (nt0, nt1)](d_a, d_c, d_o)
         out = d_o.copy_to_host()
         return out
 
@@ -141,6 +199,7 @@ try:
         parameters:
         a:        (n,3) array of n 3-dimensional coordinates
         center:   (m,3) array of m 3-dimensional coordinates
+        box:      (n,3,3) array of 3 by 3 box vectors
         nthreads: Changes the amount of threads in the cuda kernel.
                   If None, tries to be smart. [default: None]
         returns:
@@ -156,14 +215,82 @@ try:
 
         invbox = np.linalg.inv(box)
 
-        d_a = cuda.to_device((a @ invbox) % 1)
-        d_c = cuda.to_device((center @ invbox) % 1)
-        d_b = cuda.to_device(box)
+        d_a = cuda.to_device(np.ascontiguousarray((a @ invbox) % 1))
+        d_c = cuda.to_device(np.ascontiguousarray((center @ invbox) % 1))
+        d_b = cuda.to_device(np.ascontiguousarray(box))
         d_o = cuda.device_array(d_a.shape[0])
         if (nthreads is None):
             nthreads = get_nthreads(a.shape[0])
         __mindist_cuda_pbc[(a.shape[0]-1)//nthreads+1,
                            nthreads](d_a, d_c, d_b, d_o)
+        out = d_o.copy_to_host()
+        return out
+
+    @cuda.jit("void(f8[:,:,:], f8[:,:,:], f8[:,:,:], f8[:,:])")
+    def __mindist_cuda_pbc_traj(s_a, s_c, box, out):
+        i, j = cuda.grid(2)
+        if (i >= out.shape[0] or j >= out.shape[1]):
+            return
+        mind = 1000000.0
+        diff = cuda.local.array(3, numba_float64)
+        diff2 = cuda.local.array(3, numba_float64)
+        for k in range(s_c.shape[1]):
+            dist = 0.0
+            for l in range(3):
+                diff[l] = s_a[i, j, l]-s_c[i, k, l]
+                if (diff[l] > 0.5):
+                    diff[l] -= 1.0
+                elif (diff[l] < -0.5):
+                    diff[l] += 1.0
+
+            for l in range(3):
+                diff2[l] = 0.0
+                for m in range(3):
+                    diff2[l] += box[i, m, l]*diff[m]
+
+            for l in range(3):
+                dist += diff2[l]**2
+
+            if (dist < mind):
+                mind = dist
+        out[i, j] = math.sqrt(mind)
+
+    def mindist_cuda_pbc_traj(a, center, box, nthreads=None):
+        """
+        The numba cuda function used by mindist_pbc
+
+        parameters:
+        a:        (n,m,3) array of n 3-dimensional coordinates
+        center:   (n,k,3) array of m 3-dimensional coordinates
+        box:      (n,3,3) array of 3 by 3 box vectors for each frame.
+        nthreads: Changes the amount of threads in the cuda kernel.
+                  If None, tries to be smart. [default: None]
+        returns:
+        out: array of (n,m) minimum distances
+        """
+
+        if (a.dtype != np.dtype('float64')):
+            a = a.astype(np.float64)
+        if (center.dtype != np.dtype('float64')):
+            center = center.astype(np.float64)
+        if (box.dtype != np.dtype('float64')):
+            box = box.astype(np.float64)
+
+        invbox = np.linalg.inv(box)
+
+        d_a = cuda.to_device(np.ascontiguousarray((a @ invbox) % 1))
+        d_c = cuda.to_device(np.ascontiguousarray((center @ invbox) % 1))
+        d_b = cuda.to_device(np.ascontiguousarray(box))
+        d_o = cuda.device_array(d_a.shape[:2])
+        if (nthreads is None):
+            nt0, nt1 = get_2nthreads(*a.shape[:2])
+        else:
+            if type(nthreads) == tuple:
+                nt0, nt1 = nthreads
+            else:
+                nt0 = nt1 = nthreads
+        __mindist_cuda_pbc_traj[((a.shape[0]-1)//nt0+1, (a.shape[1]-1)//nt1+1),
+                                (nt0, nt1)](d_a, d_c, d_b, d_o)
         out = d_o.copy_to_host()
         return out
 
@@ -244,9 +371,9 @@ def mindist_pbc(a, center, box, bruteforce=True, gridsize=12.5, use_cuda=_can_us
     A brute force method using either OpenMP or cuda for accelerations, or a grid based one.
 
     parameters:
-        a:        shape(n,3) array of n 3-dimensional coordinates
-        center:   shape(m,3) array of m 3-dimensional coordinates
-        box:      shape(3,3) array of box vectors
+        a:        shape(n,3) or shape(t,n,3) array of n 3-dimensional coordinates
+        center:   shape(m,3) or shape(t,n,3) array of m 3-dimensional coordinates
+        box:      shape(3,3) or shape(t,3,3) array of box vectors
         bruteforce: Whether to use bruteforce calculation or a grid-based method
         gridsize: The gridsize of the grid-based method [default: 10.0]
         use_cuda: For bruteforce calculation, whether to use the cuda GPU-accelerated
@@ -260,14 +387,20 @@ def mindist_pbc(a, center, box, bruteforce=True, gridsize=12.5, use_cuda=_can_us
     """
     if (bruteforce and use_cuda):
         if (_can_use_cuda):
-            return mindist_cuda_pbc(a, center, box, nthreads)
+            if (len(a.shape) == 2):
+                return mindist_cuda_pbc(a, center, box, nthreads)
+            return mindist_cuda_pbc_traj(a, center, box, nthreads)
         print("Failed to use cuda JIT with numba", file=sys.stderr)
         print("Reason: %s: %s" %
               (reason.__class__.__name__, str(reason)), file=sys.stderr)
         print("Using copmiled fortran version", file=sys.stderr)
     if (bruteforce):
-        return mindist_pbc_omp(a, center, box)
-    return mindist_pbc_grid(a, center, box, gridsize)
+        if (len(a.shape) == 2):
+            return mindist_omp_pbc(a, center, box)
+        return mindist_omp_pbc_traj(a, center, box)
+    if (len(a.shape) == 2):
+        return mindist_pbc_grid(a, center, box, gridsize)
+    return np.array(mindist_pbc_grid(a[i], center[i], gridsize[i]) for i in range(a.shape[0]))
 
 
 def mindist(a, center, bruteforce=True, gridsize=15.0, use_cuda=_can_use_cuda, nthreads=None):
@@ -292,11 +425,17 @@ def mindist(a, center, bruteforce=True, gridsize=15.0, use_cuda=_can_use_cuda, n
     """
     if (bruteforce and use_cuda):
         if (_can_use_cuda):
-            return mindist_cuda(a, center, nthreads)
+            if (len(a.shape) == 2):
+                return mindist_cuda(a, center, nthreads)
+            return mindist_cuda_traj(a, center, nthreads)
         print("Failed to use cuda JIT with numba", file=sys.stderr)
         print("Reason: %s: %s" %
               (reason.__class__.__name__, str(reason)), file=sys.stderr)
         print("Using copmiled fortran version", file=sys.stderr)
     if (bruteforce):
-        return mindist_omp(a, center)
-    return mindist_grid(a, center, gridsize)
+        if (len(a.shape) == 2):
+            return mindist_omp(a, center, nthreads)
+        return mindist_omp_traj(a, center, nthreads)
+    if (len(a.shape) == 2):
+        return mindist_grid(a, center, gridsize)
+    return np.array(mindist_grid(a[i], center[i], gridsize[i]) for i in range(a.shape[0]))

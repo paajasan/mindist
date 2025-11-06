@@ -34,13 +34,13 @@ fc=meson.get_compiler('fortran')
 #   command : [fc.cmd_array(), '-c', '-Wall', '-fPIC', '-Ofast', '@INPUT@']
 # )
 
-modules = ['mindist', 'mindist_grid', 'mindist_PBC', 'mindist_PBC_grid']
+modules = ['mindist', 'mindist_trajectory', 'mindist_grid', 'mindist_PBC', 'mindist_PBC_trajectory', 'mindist_PBC_grid']
 mod_sources = {}
 foreach mod : modules
-    if (mod=='mindist')
-        wrp='-f2pywrappers.f'
-    else
+    if (mod.contains('PBC') or mod.contains('grid'))
         wrp='-f2pywrappers2.f90'
+    else
+        wrp='-f2pywrappers.f'
     endif
     tgt = custom_target(
         mod+'module.c',
