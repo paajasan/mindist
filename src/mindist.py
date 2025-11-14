@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2022 Santeri Paajanen
+# Copyright (c) 2025 Santeri Paajanen
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -88,13 +88,13 @@ try:
         The numba cuda function used by mindist
 
         parameters:
-        a: (n,k) array of n k-dimensional coordinates
-        center: (m,k) array of m  k-dimensional coordinates
-        nthreads: Changes the amount of threads in the cuda kernel.
-                  If None, tries to be smart. [default: None].
+            a: (n,k) array of n k-dimensional coordinates
+            center: (m,k) array of m  k-dimensional coordinates
+            nthreads: Changes the amount of threads in the cuda kernel.
+                    If None, tries to be smart. [default: None].
 
         returns:
-        out: array of (n,) minimum distances
+            out: array of (n,) minimum distances
         """
 
         if (a.dtype != np.dtype('float64')):
@@ -127,40 +127,44 @@ try:
                 mind = dist
         out[i, j] = math.sqrt(mind)
 
-    def mindist_cuda_traj(a, center, nthreads=None):
+    def mindist_cuda_traj(a, center, nthreads=None, batch_size=2048):
         """
         The numba cuda function used by mindist
 
         parameters:
-        a: (n,k) array of n k-dimensional coordinates
-        center: (m,k) array of m  k-dimensional coordinates
-        nthreads: Changes the amount of threads in the cuda kernel.
-                  If None, tries to be smart. [default: None].
+            a: (n,k) array of n k-dimensional coordinates
+            center: (m,k) array of m  k-dimensional coordinates
+            nthreads: Changes the amount of threads in the cuda kernel.
+                    If None, tries to be smart. [default: None].
+            batch_size: Runs in batches of this size over the trajectory.
+                        [default: 2048]
 
         returns:
-        out: array of (n,) minimum distances
+            out: array of (n,) minimum distances
         """
 
         if (a.dtype != np.dtype('float64')):
             a = a.astype(np.float64)
         if (center.dtype != np.dtype('float64')):
             center = center.astype(np.float64)
-
-        d_a = cuda.to_device(np.ascontiguousarray(a))
-        d_c = cuda.to_device(np.ascontiguousarray(center))
-        # d_o = cuda.device_array(d_a.shape[:2])
-        d_o = cuda.to_device(np.full(d_a.shape[:2], np.nan))
-        if (nthreads is None):
-            nt0, nt1 = get_2nthreads(*a.shape[:2])
-        else:
-            if type(nthreads) == tuple:
-                nt0, nt1 = nthreads
+        out = np.zeros(a.shape[:2])
+        for i in range(0, a.shape[0], batch_size):
+            a_batch = a[i:i+batch_size]
+            c_batch = center[i:i+batch_size]
+            d_a = cuda.to_device(np.ascontiguousarray(a_batch))
+            d_c = cuda.to_device(np.ascontiguousarray(c_batch))
+            d_o = cuda.to_device(np.full(d_a.shape[:2], np.nan))
+            if (nthreads is None):
+                nt0, nt1 = get_2nthreads(*a_batch.shape[:2])
             else:
-                nt0 = nt1 = nthreads
+                if type(nthreads) == tuple:
+                    nt0, nt1 = nthreads
+                else:
+                    nt0 = nt1 = nthreads
 
-        __mindist_cuda_traj[((a.shape[0]-1)//nt0+1, (a.shape[1]-1)//nt1+1),
-                            (nt0, nt1)](d_a, d_c, d_o)
-        out = d_o.copy_to_host()
+            __mindist_cuda_traj[((a_batch.shape[0]-1)//nt0+1, (a.shape[1]-1)//nt1+1),
+                                (nt0, nt1)](d_a, d_c, d_o)
+            out[i:i+batch_size] = d_o.copy_to_host()
         return out
 
     @cuda.jit("void(f8[:,:], f8[:,:], f8[:,:], f8[:])")
@@ -197,13 +201,14 @@ try:
         The numba cuda function used by mindist_pbc
 
         parameters:
-        a:        (n,3) array of n 3-dimensional coordinates
-        center:   (m,3) array of m 3-dimensional coordinates
-        box:      (n,3,3) array of 3 by 3 box vectors
-        nthreads: Changes the amount of threads in the cuda kernel.
-                  If None, tries to be smart. [default: None]
+            a:        (n,3) array of n 3-dimensional coordinates
+            center:   (m,3) array of m 3-dimensional coordinates
+            box:      (n,3,3) array of 3 by 3 box vectors
+            nthreads: Changes the amount of threads in the cuda kernel.
+                    If None, tries to be smart. [default: None]
+
         returns:
-        out: array of (n,) minimum distances
+            out: array of (n,) minimum distances
         """
 
         if (a.dtype != np.dtype('float64')):
@@ -255,18 +260,21 @@ try:
                 mind = dist
         out[i, j] = math.sqrt(mind)
 
-    def mindist_cuda_pbc_traj(a, center, box, nthreads=None):
+    def mindist_cuda_pbc_traj(a, center, box, nthreads=None, batch_size=2048):
         """
         The numba cuda function used by mindist_pbc
 
         parameters:
-        a:        (n,m,3) array of n 3-dimensional coordinates
-        center:   (n,k,3) array of m 3-dimensional coordinates
-        box:      (n,3,3) array of 3 by 3 box vectors for each frame.
-        nthreads: Changes the amount of threads in the cuda kernel.
-                  If None, tries to be smart. [default: None]
+            a:          (n,m,3) array of n 3-dimensional coordinates
+            center:     (n,k,3) array of m 3-dimensional coordinates
+            box:        (n,3,3) array of 3 by 3 box vectors for each frame.
+            nthreads:   Changes the amount of threads in the cuda kernel.
+                        If None, tries to be smart. [default: None]
+            batch_size: Runs in batches of this size over the trajectory.
+                        [default: 2048]
+
         returns:
-        out: array of (n,m) minimum distances
+            out: array of (n,m) minimum distances
         """
 
         if (a.dtype != np.dtype('float64')):
@@ -277,21 +285,26 @@ try:
             box = box.astype(np.float64)
 
         invbox = np.linalg.inv(box)
-
-        d_a = cuda.to_device(np.ascontiguousarray((a @ invbox) % 1))
-        d_c = cuda.to_device(np.ascontiguousarray((center @ invbox) % 1))
-        d_b = cuda.to_device(np.ascontiguousarray(box))
-        d_o = cuda.device_array(d_a.shape[:2])
-        if (nthreads is None):
-            nt0, nt1 = get_2nthreads(*a.shape[:2])
-        else:
-            if type(nthreads) == tuple:
-                nt0, nt1 = nthreads
+        out = np.zeros(a.shape[:2])
+        for i in range(0, a.shape[0], batch_size):
+            a_batch = a[i:i+batch_size]
+            c_batch = center[i:i+batch_size]
+            ib_batch = invbox[i:i+batch_size]
+            b_batch = box[i:i+batch_size]
+            d_a = cuda.to_device((a_batch @ ib_batch) % 1)
+            d_c = cuda.to_device((c_batch @ b_batch) % 1)
+            d_b = cuda.to_device(np.ascontiguousarray(b_batch))
+            d_o = cuda.device_array(d_a.shape[:2])
+            if (nthreads is None):
+                nt0, nt1 = get_2nthreads(*a_batch.shape[:2])
             else:
-                nt0 = nt1 = nthreads
-        __mindist_cuda_pbc_traj[((a.shape[0]-1)//nt0+1, (a.shape[1]-1)//nt1+1),
-                                (nt0, nt1)](d_a, d_c, d_b, d_o)
-        out = d_o.copy_to_host()
+                if type(nthreads) == tuple:
+                    nt0, nt1 = nthreads
+                else:
+                    nt0 = nt1 = nthreads
+            __mindist_cuda_pbc_traj[((a_batch.shape[0]-1)//nt0+1, (a.shape[1]-1)//nt1+1),
+                                    (nt0, nt1)](d_a, d_c, d_b, d_o)
+            out[i:i+batch_size] = d_o.copy_to_host()
         return out
 
     _can_use_cuda = True
