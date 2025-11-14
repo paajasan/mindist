@@ -68,7 +68,8 @@ try:
         nt0 = 2**((get_nthreads(n0*n1)//nt1).bit_length()-1)
         return nt0, nt1
 
-    @cuda.jit("void(f8[:,:], f8[:,:], f8[:])")
+    @cuda.jit(["void(f4[:,:], f4[:,:], f4[:])",
+               "void(f8[:,:], f8[:,:], f8[:])"])
     def __mindist_cuda(a, center, out):
         i = cuda.grid(1)
         if (i >= out.shape[0]):
@@ -96,15 +97,18 @@ try:
         returns:
             out: array of (n,) minimum distances
         """
+        dtype = max(a.dtype, center.dtype)
+        dtype = max(dtype, np.dtype('float32'))
+        dtype = min(dtype, np.dtype('float64'))
 
-        if (a.dtype != np.dtype('float64')):
-            a = a.astype(np.float64)
-        if (center.dtype != np.dtype('float64')):
-            center = center.astype(np.float64)
+        if (a.dtype != dtype):
+            a = a.astype(dtype)
+        if (center.dtype != dtype):
+            center = center.astype(dtype)
 
         d_a = cuda.to_device(np.ascontiguousarray(a))
         d_c = cuda.to_device(np.ascontiguousarray(center))
-        d_o = cuda.device_array(d_a.shape[0])
+        d_o = cuda.device_array(d_a.shape[0], dtype=dtype)
         if (nthreads is None):
             nthreads = get_nthreads(a.shape[0])
 
@@ -112,7 +116,8 @@ try:
         out = d_o.copy_to_host()
         return out
 
-    @cuda.jit("void(f8[:,:,:], f8[:,:,:], f8[:,:])")
+    @cuda.jit(["void(f4[:,:,:], f4[:,:,:], f4[:,:])",
+               "void(f8[:,:,:], f8[:,:,:], f8[:,:])"])
     def __mindist_cuda_traj(a, center, out):
         i, j = cuda.grid(2)
         if (i >= out.shape[0] or j >= out.shape[1]):
@@ -142,18 +147,22 @@ try:
         returns:
             out: array of (n,) minimum distances
         """
+        dtype = max(a.dtype, center.dtype)
+        dtype = max(dtype, np.dtype('float32'))
+        dtype = min(dtype, np.dtype('float64'))
 
-        if (a.dtype != np.dtype('float64')):
-            a = a.astype(np.float64)
-        if (center.dtype != np.dtype('float64')):
-            center = center.astype(np.float64)
-        out = np.zeros(a.shape[:2])
+        if (a.dtype != dtype):
+            a = a.astype(dtype)
+        if (center.dtype != dtype):
+            center = center.astype(dtype)
+
+        out = np.zeros(a.shape[:2], dtype=dtype)
         for i in range(0, a.shape[0], batch_size):
             a_batch = a[i:i+batch_size]
             c_batch = center[i:i+batch_size]
             d_a = cuda.to_device(np.ascontiguousarray(a_batch))
             d_c = cuda.to_device(np.ascontiguousarray(c_batch))
-            d_o = cuda.to_device(np.full(d_a.shape[:2], np.nan))
+            d_o = cuda.device_array(d_a.shape[:2], dtype=dtype)
             if (nthreads is None):
                 nt0, nt1 = get_2nthreads(*a_batch.shape[:2])
             else:
@@ -167,14 +176,15 @@ try:
             out[i:i+batch_size] = d_o.copy_to_host()
         return out
 
-    @cuda.jit("void(f8[:,:], f8[:,:], f8[:,:], f8[:])")
+    @cuda.jit(["void(f4[:,:], f4[:,:], f4[:,:], f4[:])",
+               "void(f8[:,:], f8[:,:], f8[:,:], f8[:])"])
     def __mindist_cuda_pbc(s_a, s_c, box, out):
         i = cuda.grid(1)
         if (i >= out.shape[0]):
             return
         mind = 1000000.0
-        diff = cuda.local.array(3, numba_float64)
-        diff2 = cuda.local.array(3, numba_float64)
+        diff = cuda.local.array(3, s_a.dtype)
+        diff2 = cuda.local.array(3, s_a.dtype)
         for j in range(s_c.shape[0]):
             dist = 0.0
             for k in range(3):
@@ -210,20 +220,23 @@ try:
         returns:
             out: array of (n,) minimum distances
         """
+        dtype = max(a.dtype, center.dtype, box.dtype)
+        dtype = max(dtype, np.dtype('float32'))
+        dtype = min(dtype, np.dtype('float64'))
 
-        if (a.dtype != np.dtype('float64')):
-            a = a.astype(np.float64)
-        if (center.dtype != np.dtype('float64')):
-            center = center.astype(np.float64)
-        if (box.dtype != np.dtype('float64')):
-            box = box.astype(np.float64)
+        if (a.dtype != dtype):
+            a = a.astype(dtype)
+        if (center.dtype != dtype):
+            center = center.astype(dtype)
+        if (box.dtype != dtype):
+            box = box.astype(dtype)
 
         invbox = np.linalg.inv(box)
 
         d_a = cuda.to_device(np.ascontiguousarray((a @ invbox) % 1))
         d_c = cuda.to_device(np.ascontiguousarray((center @ invbox) % 1))
         d_b = cuda.to_device(np.ascontiguousarray(box))
-        d_o = cuda.device_array(d_a.shape[0])
+        d_o = cuda.device_array(d_a.shape[0], dtype=dtype)
         if (nthreads is None):
             nthreads = get_nthreads(a.shape[0])
         __mindist_cuda_pbc[(a.shape[0]-1)//nthreads+1,
@@ -231,14 +244,15 @@ try:
         out = d_o.copy_to_host()
         return out
 
-    @cuda.jit("void(f8[:,:,:], f8[:,:,:], f8[:,:,:], f8[:,:])")
+    @cuda.jit(["void(f4[:,:,:], f4[:,:,:], f4[:,:,:], f4[:,:])",
+               "void(f8[:,:,:], f8[:,:,:], f8[:,:,:], f8[:,:])"])
     def __mindist_cuda_pbc_traj(s_a, s_c, box, out):
         i, j = cuda.grid(2)
         if (i >= out.shape[0] or j >= out.shape[1]):
             return
         mind = 1000000.0
-        diff = cuda.local.array(3, numba_float64)
-        diff2 = cuda.local.array(3, numba_float64)
+        diff = cuda.local.array(3, s_a.dtype)
+        diff2 = cuda.local.array(3, s_a.dtype)
         for k in range(s_c.shape[1]):
             dist = 0.0
             for l in range(3):
@@ -276,16 +290,19 @@ try:
         returns:
             out: array of (n,m) minimum distances
         """
+        dtype = max(a.dtype, center.dtype, box.dtype)
+        dtype = max(dtype, np.dtype('float32'))
+        dtype = min(dtype, np.dtype('float64'))
 
-        if (a.dtype != np.dtype('float64')):
-            a = a.astype(np.float64)
-        if (center.dtype != np.dtype('float64')):
-            center = center.astype(np.float64)
-        if (box.dtype != np.dtype('float64')):
-            box = box.astype(np.float64)
+        if (a.dtype != dtype):
+            a = a.astype(dtype)
+        if (center.dtype != dtype):
+            center = center.astype(dtype)
+        if (box.dtype != dtype):
+            box = box.astype(dtype)
 
         invbox = np.linalg.inv(box)
-        out = np.zeros(a.shape[:2])
+        out = np.zeros(a.shape[:2], dtype=dtype)
         for i in range(0, a.shape[0], batch_size):
             a_batch = a[i:i+batch_size]
             c_batch = center[i:i+batch_size]
@@ -294,7 +311,7 @@ try:
             d_a = cuda.to_device((a_batch @ ib_batch) % 1)
             d_c = cuda.to_device((c_batch @ b_batch) % 1)
             d_b = cuda.to_device(np.ascontiguousarray(b_batch))
-            d_o = cuda.device_array(d_a.shape[:2])
+            d_o = cuda.device_array(d_a.shape[:2], dtype=dtype)
             if (nthreads is None):
                 nt0, nt1 = get_2nthreads(*a_batch.shape[:2])
             else:
