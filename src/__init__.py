@@ -1,5 +1,6 @@
 from . import _f2py
 from . import mindist as _mindist
+from . import contacts as _contacts
 
 mindist = _mindist.mindist
 mindist_omp = _mindist.mindist_omp
@@ -8,6 +9,9 @@ mindist_pbc = _mindist.mindist_pbc
 mindist_omp_pbc = _mindist.mindist_omp_pbc
 mindist_omp_pbc_traj = _mindist.mindist_omp_pbc_traj
 mindist_pbc_grid = _mindist.mindist_pbc_grid
+
+contacts = _contacts.contacts
+contacts_traj = _contacts.contacts_traj
 
 can_use_cuda = _mindist._can_use_cuda
 no_cuda_reson = _mindist.reason

@@ -10,7 +10,7 @@ authors         = [
     {name = "Santeri Paajanen", email = "santeri.e.paajanen@helsinki.fi"}
 ]
 requires-python = ">=3.8"
-version         = "0.0.6"
+version         = "0.1.0.dev"
 description     = "Minimum distance calculations for MD data"
 readme          = "README.md"
 license         = "MIT"

@@ -34,7 +34,7 @@ fc=meson.get_compiler('fortran')
 #   command : [fc.cmd_array(), '-c', '-Wall', '-fPIC', '-Ofast', '@INPUT@']
 # )
 
-modules = ['mindist', 'mindist_trajectory', 'mindist_grid', 'mindist_PBC', 'mindist_PBC_trajectory', 'mindist_PBC_grid']
+modules = ['mindist', 'mindist_trajectory', 'mindist_grid', 'mindist_PBC', 'mindist_PBC_trajectory', 'mindist_PBC_grid', 'contacts_PBC_grid_trajectory']
 mod_sources = {}
 foreach mod : modules
     if (mod.contains('PBC') or mod.contains('grid'))
@@ -52,7 +52,8 @@ foreach mod : modules
 endforeach
 
 py.install_sources(['src/__init__.py',
-                    'src/mindist.py'],
+                    'src/mindist.py',
+                    'src/contacts.py'],
                     subdir : 'mindist')
 
 py.install_sources(['lib/__init__.py'],
@@ -60,9 +61,12 @@ py.install_sources(['lib/__init__.py'],
 
 foreach mod : modules
     files = ['lib/'+mod+'.f90']
-    if (mod.contains('grid'))
+    if (mod.contains('mindist') and mod.contains('grid'))
       files += ['lib/stdlib_sorting_sort_index_real.f90',
                 'lib/'+mod+'_utils.f90']
+    endif
+    if (mod.contains('contacts') and mod.contains('PBC'))
+      files += ['lib/contacts_PBC_grid_utils.f90']
     endif
     if (mod.contains('PBC'))
       files += ['lib/mindist_PBC_utils.f90']
