@@ -309,7 +309,7 @@ try:
             ib_batch = invbox[i:i+batch_size]
             b_batch = box[i:i+batch_size]
             d_a = cuda.to_device((a_batch @ ib_batch) % 1)
-            d_c = cuda.to_device((c_batch @ b_batch) % 1)
+            d_c = cuda.to_device((c_batch @ ib_batch) % 1)
             d_b = cuda.to_device(np.ascontiguousarray(b_batch))
             d_o = cuda.device_array(d_a.shape[:2], dtype=dtype)
             if (nthreads is None):
